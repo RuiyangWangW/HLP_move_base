@@ -1,0 +1,40 @@
+cmake_minimum_required(VERSION 3.0.2)
+project(planner)
+
+## Compile as C++11, supported in ROS Kinetic and newer
+# add_compile_options(-std=c++11)
+
+## Find catkin macros and libraries
+## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
+## is used, also find other catkin packages
+find_package(catkin REQUIRED COMPONENTS
+  roscpp
+  geometry_msgs
+  tf
+  nav_msgs
+  std_srvs
+  std_msgs
+)
+
+catkin_package(
+  #INCLUDE_DIRS include
+  CATKIN_DEPENDS roscpp std_msgs std_srvs geometry_msgs tf nav_msgs
+)
+
+include_directories(include ${catkin_INCLUDE_DIRS})
+
+add_executable(${PROJECT_NAME}_node src/planner_node.cpp)
+
+add_dependencies(${PROJECT_NAME}_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS} )
+
+target_link_libraries(${PROJECT_NAME}_node
+  ${catkin_LIBRARIES}
+)
+
+add_executable(odom_tf_publisher src/odom_tf_publisher.cpp)
+
+add_dependencies(odom_tf_publisher ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS} )
+
+target_link_libraries(odom_tf_publisher
+  ${catkin_LIBRARIES}
+)
