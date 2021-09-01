@@ -1,11 +1,15 @@
 controller_frequency: 5.0
 recovery_behaviour_enabled: true
 
+
 GlobalPlanner:
   default_tolerance: 0.1
   use_dijkstra: false
   use_grid_path: true
-
+  allow_unknown: false  
+  cost_factor: 0.55
+  neutral_cost: 66
+  lethal_cost: 206
 
 DWAPlannerROS:
   # Robot configuration parameters  
