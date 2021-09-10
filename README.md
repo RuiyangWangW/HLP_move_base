@@ -8,7 +8,8 @@ Run `rosrun map_server map_server ~/HLP_move_base/src/planner/maps/map.yaml /map
 
 ## Run move_base
 This is the key package for our HLP
-Run `roslaunch planner move_base.launch`
+Run `source ~/HLP_move_base/devel/setup.bash`
+`roslaunch planner move_base.launch`
 
 ## Visualize Path
 Run `rosrun rviz rviz`
