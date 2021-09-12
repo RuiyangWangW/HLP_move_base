@@ -3,13 +3,10 @@
 ## Build
 Run `catkin_make`
 
-## Publish Binary Map
-Run `rosrun map_server map_server ~/HLP_move_base/src/planner/maps/map.yaml /map:=/binary_map`
-
 ## Run move_base
 This is the key package for our HLP <br />
 Run `source ~/HLP_move_base/devel/setup.bash` <br />
-`roslaunch planner move_base.launch`
+`roslaunch planner move_base.launch path_to_map_file`
 
 ## Visualize Path
 Run `rosrun rviz rviz`
