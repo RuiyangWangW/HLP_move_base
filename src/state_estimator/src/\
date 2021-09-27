@@ -1,0 +1,227 @@
+#!/usr/bin/env python
+
+import rospy
+from vkf6 import VKF
+import numpy as np
+import math
+from threading import Lock
+from geometry_msgs.msg import PointStamped
+from sensor_msgs.msg import Imu
+from ackermann_msgs.msg import AckermannDriveStamped
+from vesc_msgs.msg import VescStateStamped
+from std_msgs.msg import Header
+from std_msgs.msg import Float64
+def rotation_matrix(angle):
+  m = np.array([[math.cos(angle), math.sin(angle)],[-math.sin(angle), math.cos(angle)]])
+  return m
+
+def observe_yaw(x_in):
+  obs=np.zeros(1)
+  obs[0]=x_in[2]
+  return obs
+
+def observe_yaw_jacobian(x_in):
+  H=np.zeros([1,3])
+  H[0][2]=1;
+  return H
+
+def get_driving_force(w, u, v, r, delta):
+  #Define Constants
+  C_1 = 19
+  C_2 = 22
+  C_af1 = 103
+  C_af2 = 1.35
+  C_ar1 = 97
+  C_ar2 = 28.8
+  l_f = 0.24
+  l_r = 0.068
+
+  #Calculate Intermediate parameters
+  C_f1 = (2*C_1*l_r)/(l_f+l_r)
+  C_r1 = (2*C_1*l_f)/(l_f+l_r)
+  v_f = v + l_f*r
+  v_r = v - l_r*r
+  column = np.dot(rotation_matrix(-delta), np.array([u, v_f]))
+  u_wf = column[0]
+  v_wf = column[1]
+  u_wr = u
+  v_wr = v_r
+  B_f = (w-u_wf)/max(math.sqrt((w**2)+0.05),math.sqrt((u_wf**2)+0.05))
+  B_r = (w-u_wr)/max(math.sqrt((w**2)+0.05),math.sqrt((u_wr**2)+0.05))   
+  a_f = np.arctan2(v_wf,u_wf) 
+  a_r = np.arctan2(v_wr,u_wr)
+  #Calculate Force
+  F = np.zeros(4)
+  F[0] = C_f1*math.tanh(C_2*B_f)
+  F[1] = C_r1*math.tanh(C_2*B_r)
+  F[2] = -C_af1*math.tanh(C_af2*a_f)
+  F[3] = -C_ar1*math.tanh(C_ar2*a_r)
+
+  return F
+
+def iterate_x(x_in, timestep, inputs):
+  # Vehicle Constants
+  m = 5.0
+  I_zz = 3.39
+  l_f = 0.24
+  l_r = 0.068
+  # Input variables
+  angular_velocity = inputs[0]
+  steering_angle = inputs[1]
+
+  # Read from previous state variables
+  u_prev = x_in[0];
+  v_prev = x_in[1];
+  r_prev = x_in[2];
+
+  #Read forces
+  F = get_driving_force(angular_velocity, u_prev, v_prev, r_prev, steering_angle)
+  F_xwf = F[0]
+  F_xwr = F[1]
+  F_ywf = F[2]
+  F_ywr = F[3]
+  #Calculate derivatives
+  u_dot = (((math.cos(steering_angle)*F_xwf)+F_xwr-(math.sin(steering_angle)*F_ywf))/m)+(v_prev*r_prev)
+  v_dot = (((math.sin(steering_angle)*F_xwf)+F_ywr+(math.cos(steering_angle)*F_ywf))/m)-(u_prev*r_prev)
+  r_dot = ((l_f*((math.sin(steering_angle)*F_xwf)+(math.cos(steering_angle)*F_ywf)))-(l_r*F_ywr))/I_zz
+  
+  x_out = np.zeros(3)
+  x_out[0] = u_prev + (u_dot*timestep)
+  x_out[1] = v_prev + (v_dot*timestep)
+  x_out[2] = r_prev + (r_dot*timestep)
+
+  return x_out 
+
+def definition():
+  global state_estimator 
+  global mutex
+  global estimator_rate
+  global pub_state
+  global imu_r
+  global new_imu_measurement
+  new_imu_measurement = False  
+  mutex = Lock()
+  estimator_rate = 40
+  pub_state = rospy.Publisher('/state_estimator/states', PointStamped, queue_size=10)
+
+  #Input Noise
+  M = np.zeros([2,2])
+  M[0][0] = 0.05
+  M[1][1] = 0.05 
+  # Initial Covariance
+  c = np.eye(3)
+  c[0][0] = 3.2409
+  c[0][1] = 0.1947
+  c[0][2] = -1.4780
+  c[1][0] = 0.1947
+  c[1][1] = 0.5913
+  c[1][2] = -3.9396
+  c[2][0] = -1.4780
+  c[2][1] = -3.9396
+  c[2][2] = 30.15
+  
+  state_estimator = VKF(3, 2, M, np.zeros(3), np.zeros(2), c, 1,1.0, 2.0, iterate_x)
+
+def update_angular_velocity(data):
+  global mutex
+  global state_estimator
+  mutex.acquire()
+  speed = data.state.speed/2072
+  if (speed >= 0):
+    state_estimator.update_inputs([0],[data.state.speed/2072])
+  else:
+    state_estimator.update_inputs([0],[0])
+    state_estimator.update_inputs([1],[0])
+    state_estimator.set_state([0],[-1])
+    state_estimator.set_state([1],[-1])
+    state_estimator.set_state([2],[-1])
+  mutex.release()
+def update_steering_angle(delta):
+  global mutex
+  global state_estimator
+  delta = delta.data
+  delta = (delta-0.53)/0.8298
+  states_now = state_estimator.get_state()
+  mutex.acquire()
+  if (states_now[0] >= 0):
+    state_estimator.update_inputs([1],[delta])
+  mutex.release()
+
+def update_r(data):
+  global new_imu_measurement
+  global imu_r
+  global mutex
+  global last_imu_measurement_time
+  global estimator_rate 
+  d_time = rospy.Time.now() - last_imu_measurement_time
+  if (d_time.to_sec() < 1.0/estimator_rate/2.0):
+    return
+  mutex.acquire()
+  imu_r = data.angular_velocity.z
+  new_imu_measurement = True
+  mutex.release()
+
+def gen_state():
+  global state_estimator
+  states = state_estimator.get_state()
+  msg = PointStamped()
+  msg.header = Header()
+  msg.header.stamp = rospy.Time.now()
+  msg.header.frame_id = 'base_link' 
+  
+  msg.point.x = states[0]
+  msg.point.y = states[1]
+  msg.point.z = states[2]
+  return msg
+
+def posalert(Q):
+  egs = np.linalg.eigvals(Q)
+  neg = False
+
+  for eg in egs:
+    if eg<0:
+      neg=True
+  return neg
+
+def general_update(data):
+  global last_predict_time
+  global mutex
+  global state_estimator
+  global pub_state
+  global imu_r
+  global new_imu_measurement 
+  
+  mutex.acquire()
+  if (posalert(state_estimator.get_covar())):
+    P=np.eye(3)
+    P*=0.01
+    state_estimator.reset(state_estimator.get_state(), P)
+    print("Reset Covariance Matrix")
+
+  d_time = rospy.Time.now() - last_predict_time
+  last_predict_time += d_time
+  state_estimator.predict(d_time.to_sec())
+  states_now = state_estimator.get_state()
+  if ((new_imu_measurement) and (states_now[0] >= 0)):
+    state_estimator.update(imu_r,observe_yaw,observe_yaw_jacobian,0.05)
+    new_imu_measurement = False
+  pub_state.publish(gen_state())
+  mutex.release() 
+
+
+def main():
+  global last_predict_time
+  global last_imu_measurement_time
+  rospy.init_node('state_estimator')
+  last_predict_time = rospy.Time.now()
+  last_imu_measurement_time = rospy.Time.now()
+  sub1 = rospy.Subscriber('/imu/data',Imu, update_r)
+  sub2 = rospy.Subscriber('/vesc/sensors/core', VescStateStamped, update_angular_velocity)
+  sub3 = rospy.Subscriber('/vesc/commands/servo/position', Float64, update_steering_angle)
+  estimator = rospy.Timer(rospy.Duration(1.0/estimator_rate), general_update)
+  rospy.spin()
+
+if __name__ == "__main__":
+  definition()
+  main()
+
