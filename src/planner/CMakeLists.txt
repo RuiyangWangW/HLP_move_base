@@ -31,10 +31,10 @@ target_link_libraries(${PROJECT_NAME}_node
   ${catkin_LIBRARIES}
 )
 
-add_executable(odom_tf_publisher src/odom_tf_publisher.cpp)
+add_executable(interpolator_node src/interpolator.cpp)
 
-add_dependencies(odom_tf_publisher ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS} )
+add_dependencies(interpolator_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS} )
 
-target_link_libraries(odom_tf_publisher
+target_link_libraries(interpolator_node
   ${catkin_LIBRARIES}
 )

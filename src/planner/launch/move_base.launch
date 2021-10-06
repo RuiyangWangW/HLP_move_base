@@ -60,7 +60,7 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCL
     <param name="global_costmap/height" value="100.0"/>
 
  
-    <param name="planner_frequency" value="0.0" />
+    <param name="planner_frequency" value="1.0" />
   </node>
 
 </launch>
