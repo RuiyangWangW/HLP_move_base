@@ -199,7 +199,6 @@ int main(int argc, char** argv){
           }
           pub1.publish(wpts);
           wpts.poses.clear();
-          path_updated = false;
         }
         ros::spinOnce();
         loop_rate.sleep();
